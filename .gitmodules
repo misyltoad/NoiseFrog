@@ -1,0 +1,6 @@
+[submodule "thirdparty/rnnoise"]
+	path = thirdparty/rnnoise
+	url = https://github.com/xiph/rnnoise
+[submodule "thirdparty/ladspa-sdk"]
+	path = thirdparty/ladspa-sdk
+	url = https://github.com/Joshua-Ashton/ladspa-sdk
