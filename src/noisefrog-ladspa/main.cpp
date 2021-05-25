@@ -45,7 +45,7 @@ namespace NoiseFrog {
           // GracePeriod
           {
             .descriptor      = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL,
-            .name            = "Grace Period (in samples)",
+            .name            = "Grace Period (in frames)",
             .rangeDescriptor = LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_BOUNDED_ABOVE | LADSPA_HINT_DEFAULT_MIDDLE | LADSPA_HINT_INTEGER,
             .lowerBound      = 0.0f,
             .upperBound      = 40.0f,
