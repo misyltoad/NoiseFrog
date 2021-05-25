@@ -62,6 +62,9 @@ namespace NoiseFrog {
         } else {
           for (uint32_t i = 0; i < RNNoiseFrameSize && outputCursor < sampleCount; outputCursor++, m_outputCacheSize--)
             out[outputCursor] = 0.0f;
+
+          for (uint32_t i = m_outputCacheSize; i; i--)
+            m_output[RNNoiseFrameSize - i] = 0.0f;
         }
 
         m_inputCacheSize = 0;
