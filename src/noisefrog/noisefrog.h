@@ -5,6 +5,8 @@
 #include <memory>
 #include <limits>
 #include <array>
+#include <cstring>
+#include <cassert>
 
 #include "rnnoise.h"
 
@@ -21,70 +23,83 @@ namespace NoiseFrog {
     }
 
     inline void processSamples(const float* in, float* out, float voiceThreshold, uint32_t sampleCount, uint16_t maxGracePeriod) {
-      const uint32_t newSamples         = sampleCount;
-      const uint32_t totalInputSamples  = newSamples + m_inputCacheSize;
-      const uint32_t samplesToProcess   = (totalInputSamples / RNNoiseFrameSize) * RNNoiseFrameSize;
-      const uint32_t framesToProcess    = samplesToProcess / RNNoiseFrameSize;
-      const uint32_t missedSamples      = totalInputSamples - samplesToProcess;
-      const uint32_t totalOutputSamples = m_outputCacheSize + samplesToProcess;
-      const uint32_t samplesToSkip      = totalOutputSamples < sampleCount ? sampleCount - totalOutputSamples : 0;
+      voiceThreshold = 0.95f; // HACK
 
-      uint32_t outputCursor = 0;
-      uint32_t inputCursor = 0;
+      const float* in_end  = in  + sampleCount;
+      const float* out_end = out + sampleCount;
 
-      // Deal with the number of samples to skip to keep
-      // a full frame going.
-      for (uint32_t i = 0; i < samplesToSkip && outputCursor < sampleCount; outputCursor++, i++)
-        out[outputCursor] = 0.0f;
+      const uint32_t inputSampleCount       = m_inputCacheSize + sampleCount;
+      const uint32_t inputFrames            = inputSampleCount / RNNoiseFrameSize;
+      const uint32_t totalOutputSamples     = (RNNoiseFrameSize - m_outputCacheIdx) + inputFrames * RNNoiseFrameSize;
+      const uint32_t missedSamples          = sampleCount > totalOutputSamples ? sampleCount - totalOutputSamples : 0;
 
-      // Deal with the output cache
-      for (; m_outputCacheSize && outputCursor < sampleCount; outputCursor++, m_outputCacheSize--)
-        out[outputCursor] = m_output[RNNoiseFrameSize - m_outputCacheSize] / std::numeric_limits<short>::max();
+      // Output our current cached samples.
+      {
+        for (; out < out_end && m_outputCacheIdx < RNNoiseFrameSize; m_outputCacheIdx++, out++)
+          *out = m_outputCache[m_outputCacheIdx];
+      }
 
-      for (uint32_t frame = 0; frame < framesToProcess; frame++) {
-        const uint32_t newSamples  = RNNoiseFrameSize - m_inputCacheSize;
+      // Output blank for any samples we will miss at the start.
+      // The idea here is that this will never happen once we start populating
+      // the i/o caches.
+      // TODO: Do we want to do this at the end?
+      {
+        for (uint32_t i = 0; i < missedSamples; i++, out++)
+          *out = 0.0f;
+      }
 
-        for (uint32_t i = 0; i < newSamples; inputCursor++, i++)
-          m_input[m_inputCacheSize + i] = in[inputCursor] * std::numeric_limits<short>::max();
+      assert(m_outputCacheIdx == RNNoiseFrameSize);
 
-        float voicePercentage = rnnoise_process_frame(m_rnnoise.get(), m_output.data(), m_input.data());
+      // Process the current frame
+      for (uint32_t frame = 0; frame < inputFrames; frame++) {
+        std::array<float, RNNoiseFrameSize> input;
+        const uint32_t cachedInSamples  = m_inputCacheSize;
+        const uint32_t currentInSamples = RNNoiseFrameSize - cachedInSamples;
+        std::memcpy(&input[0],               m_inputCache.data(), cachedInSamples  * sizeof(float));
+        std::memcpy(&input[cachedInSamples], in,                  currentInSamples * sizeof(float));
+        in += currentInSamples;
+        m_inputCacheSize = 0;
+
+        // Scale from [-1, 1] to [-32767, 32767]
+        for (uint32_t i = 0; i < RNNoiseFrameSize; i++)
+          input[i] *= std::numeric_limits<short>::max();
+
+        float voicePercentage = rnnoise_process_frame(m_rnnoise.get(), m_outputCache.data(), input.data());
 
         if (voicePercentage >= voiceThreshold)
           m_gracePeriod = maxGracePeriod;
 
-        m_outputCacheSize = RNNoiseFrameSize;
         if (m_gracePeriod != 0) {
           // Scale from [-32767, 32767] back to [-1, 1]
-          for (uint32_t i = 0; i < RNNoiseFrameSize && outputCursor < sampleCount; outputCursor++, i++, m_outputCacheSize--)
-            out[outputCursor] = m_output[i] / std::numeric_limits<short>::max();
+          for (uint32_t i = 0; i < RNNoiseFrameSize; i++)
+            m_outputCache[i] /= std::numeric_limits<short>::max();
 
           m_gracePeriod--;
         } else {
-          for (uint32_t i = 0; i < RNNoiseFrameSize && outputCursor < sampleCount; outputCursor++, m_outputCacheSize--)
-            out[outputCursor] = 0.0f;
-
-          for (uint32_t i = m_outputCacheSize; i; i--)
-            m_output[RNNoiseFrameSize - i] = 0.0f;
+          for (uint32_t i = 0; i < RNNoiseFrameSize; i++)
+            m_outputCache[i] = 0.0f;
         }
 
-        m_inputCacheSize = 0;
+        // Output what we can right now.
+        for (m_outputCacheIdx = 0; out < out_end && m_outputCacheIdx < RNNoiseFrameSize; m_outputCacheIdx++, out++)
+          *out = m_outputCache[m_outputCacheIdx];
       }
 
-      // Store the missed samples for next time.
-      for (uint32_t i = 0; i < missedSamples; inputCursor++, i++)
-        m_input[i] = in[inputCursor] * std::numeric_limits<short>::max();
-
-      m_inputCacheSize = missedSamples;
+      // Put our missed samples in the input cache
+      {
+        for (; in < in_end && m_inputCacheSize < RNNoiseFrameSize; m_inputCacheSize++, in++)
+          m_inputCache[m_inputCacheSize] = *in;
+      }
     }
 
   private:
 
-    std::array<float, RNNoiseFrameSize> m_input;
-    std::array<float, RNNoiseFrameSize> m_output;
+    std::array<float, RNNoiseFrameSize> m_inputCache;
+    std::array<float, RNNoiseFrameSize> m_outputCache;
+    uint32_t m_inputCacheSize = 0;
+    uint32_t m_outputCacheIdx = RNNoiseFrameSize;
 
     RNNoiseContext m_rnnoise;
-    uint32_t m_inputCacheSize = 0;
-    uint32_t m_outputCacheSize = 0;
     uint16_t m_gracePeriod = 0;
 
   };

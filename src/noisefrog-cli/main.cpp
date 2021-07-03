@@ -40,7 +40,7 @@ static void get_source_info_callback(pa_context *context, const pa_source_info *
     pa_operation_unref(pa_context_load_module(
         context,
         "module-ladspa-source",
-        "source_name='NoiseFrog Noise Reduction (Mono)' master=44 rate=48000 channels=1 label=noisefrog plugin='/home/joshua/Desktop/Code/NoiseFrog/build/src/noisefrog-ladspa/libnoisefrog-ladspa.so' control=0.9,20",
+        "source_name='NoiseFrog Noise Reduction (Mono)' master=43 rate=48000 channels=1 label=noisefrog plugin='/home/joshua/Desktop/Code/NoiseFrog/build/src/noisefrog-ladspa/libnoisefrog-ladspa.so' control=0.9,20",
         module_load_callback,
         nullptr
       ));
